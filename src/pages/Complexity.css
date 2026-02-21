@@ -1,0 +1,215 @@
+.complexity-page {
+    min-height: 100vh;
+    padding: 80px 0 60px;
+}
+
+.cplx-header {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-bottom: 28px;
+}
+
+.cplx-title {
+    font-size: clamp(1.5rem, 4vw, 2rem);
+    font-weight: 800;
+    background: var(--gradient);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin: 0 0 6px;
+}
+
+.cplx-subtitle {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    margin: 0;
+}
+
+.cplx-filters {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.cplx-filter-btn {
+    padding: 6px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all var(--t-fast);
+}
+
+.cplx-filter-btn:hover,
+.cplx-filter-btn.active {
+    border-color: var(--cat-color, var(--accent-purple));
+    color: var(--cat-color, #a78bfa);
+    background: color-mix(in srgb, var(--cat-color, var(--accent-purple)) 12%, transparent);
+}
+
+/* Table */
+.cplx-table-wrap {
+    overflow-x: auto;
+    padding: 0;
+    border-radius: var(--r-md);
+}
+
+.cplx-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.cplx-th {
+    padding: 14px 16px;
+    text-align: left;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    transition: color var(--t-fast);
+}
+
+.cplx-th:hover {
+    color: var(--text-primary);
+}
+
+.cplx-th.sorted {
+    color: #a78bfa;
+}
+
+.sort-icon {
+    font-size: 0.7rem;
+    opacity: 0.7;
+}
+
+.cplx-row {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    transition: background var(--t-fast);
+}
+
+.cplx-row:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.cplx-row:last-child {
+    border-bottom: none;
+}
+
+.cplx-row td {
+    padding: 12px 16px;
+    vertical-align: middle;
+}
+
+.cplx-algo-link {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+    color: var(--text-primary);
+    transition: color var(--t-fast);
+}
+
+.cplx-algo-link:hover .cplx-algo-name {
+    color: #a78bfa;
+}
+
+.cplx-cat-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.cplx-algo-name {
+    font-weight: 600;
+}
+
+.cplx-algo-en {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+.cplx-val {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.stable-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+
+.stable-badge.stable {
+    background: rgba(34, 197, 94, 0.12);
+    color: #22c55e;
+    border: 1px solid rgba(34, 197, 94, 0.25);
+}
+
+.stable-badge.unstable {
+    background: rgba(239, 68, 68, 0.1);
+    color: #ef4444;
+    border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.stable-badge.na {
+    color: var(--text-muted);
+}
+
+/* Legend */
+.cplx-legend {
+    margin-top: 24px;
+    padding: 16px 20px;
+    background: var(--bg-elevated);
+    border-radius: var(--r-md);
+    border: 1px solid var(--border);
+}
+
+.cplx-legend-title {
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.cplx-legend-items {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+}
+
+.cplx-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.cplx-legend-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.cplx-legend-item code {
+    font-size: 0.78rem;
+}
