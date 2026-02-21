@@ -1,0 +1,218 @@
+.interview-plan-page {
+    padding: 24px 0 80px;
+}
+
+.interview-plan-header {
+    padding: 22px 24px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.interview-plan-title {
+    font-size: 1.8rem;
+    font-weight: 800;
+    line-height: 1.1;
+}
+
+.interview-plan-subtitle {
+    margin-top: 10px;
+    color: var(--text-secondary);
+    max-width: 760px;
+    line-height: 1.7;
+    font-size: 0.92rem;
+}
+
+.interview-plan-meta {
+    margin-top: 14px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.interview-plan-meta span {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px 10px;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.interview-plan-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.plan-action-btn {
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    padding: 8px 12px;
+    font-size: 0.82rem;
+    cursor: pointer;
+    transition: all var(--t-fast);
+}
+
+.plan-action-btn:hover {
+    border-color: var(--border-hover);
+}
+
+.plan-action-clear {
+    color: #fca5a5;
+}
+
+.interview-plan-progress {
+    margin-top: 12px;
+    height: 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+}
+
+.interview-plan-progress-fill {
+    height: 100%;
+    background: var(--gradient);
+    border-radius: 999px;
+    transition: width 0.35s ease;
+}
+
+.interview-plan-grid {
+    margin-top: 18px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.interview-day-card {
+    padding: 16px;
+}
+
+.interview-day-card.done {
+    border-color: rgba(34, 197, 94, 0.45);
+    box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.2) inset;
+}
+
+.interview-day-top {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.interview-day-title {
+    font-size: 1.02rem;
+    font-weight: 700;
+}
+
+.interview-day-theme {
+    margin-top: 3px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.interview-day-count {
+    font-family: var(--font-mono);
+    color: var(--accent-end);
+    font-size: 0.85rem;
+}
+
+.interview-day-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.day-mini-btn {
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--text-secondary);
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    cursor: pointer;
+    transition: all var(--t-fast);
+}
+
+.day-mini-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--border-hover);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.interview-task-list {
+    margin-top: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.interview-task-item {
+    display: grid;
+    grid-template-columns: 18px auto 1fr;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--r-sm);
+    background: rgba(255, 255, 255, 0.01);
+    cursor: pointer;
+    transition: all var(--t-fast);
+}
+
+.interview-task-item:hover {
+    border-color: var(--border-hover);
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.interview-task-item input {
+    width: 15px;
+    height: 15px;
+    accent-color: #10b981;
+    cursor: pointer;
+}
+
+.interview-task-id {
+    font-family: var(--font-mono);
+    font-size: 0.73rem;
+    color: #38bdf8;
+}
+
+.interview-task-title {
+    font-size: 0.84rem;
+    color: var(--text-secondary);
+}
+
+.interview-task-item.checked {
+    border-color: rgba(16, 185, 129, 0.45);
+    background: rgba(16, 185, 129, 0.08);
+}
+
+.interview-task-item.checked .interview-task-title {
+    color: #d1fae5;
+    text-decoration: line-through;
+    text-decoration-color: rgba(209, 250, 229, 0.5);
+}
+
+@media (max-width: 900px) {
+    .interview-plan-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 640px) {
+    .interview-plan-header {
+        padding: 16px;
+    }
+
+    .interview-plan-title {
+        font-size: 1.4rem;
+    }
+
+    .interview-day-card {
+        padding: 14px;
+    }
+}

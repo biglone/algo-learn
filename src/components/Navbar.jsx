@@ -26,6 +26,7 @@ export default function Navbar() {
                     <Link to="/" className={`nav-link${location.pathname === '/' ? ' active' : ''}`}>首页</Link>
                     <Link to="/learn" className={`nav-link${isActive('/learn') || isActive('/algorithm') ? ' active' : ''}`}>学习</Link>
                     <Link to="/complexity" className={`nav-link${isActive('/complexity') ? ' active' : ''}`}>复杂度对比</Link>
+                    <Link to="/interview-plan" className={`nav-link${isActive('/interview-plan') ? ' active' : ''}`}>面试计划</Link>
                 </div>
 
                 <div className="navbar-actions">
