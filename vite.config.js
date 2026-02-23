@@ -5,5 +5,11 @@ export default defineConfig({
     plugins: [react()],
     server: {
         allowedHosts: ['.biglone.tech'],
+        proxy: {
+            '/api/run/cpp': {
+                target: 'http://127.0.0.1:8080',
+                changeOrigin: true,
+            },
+        },
     },
 })

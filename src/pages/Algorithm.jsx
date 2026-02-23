@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { algorithms, categories } from '../data/algorithms'
 import Visualizer from '../components/Visualizer'
 import { useProgress } from '../hooks/useProgress'
+import { parseCppRunResult, runCppCode } from '../utils/cppRunner'
 import './Algorithm.css'
 
 const difficultyLabel = { easy: '入门', medium: '进阶', hard: '困难' }
@@ -69,6 +70,55 @@ function pyGlobalToString(pyodide, name) {
     return text
 }
 
+function toCamelCase(text = '') {
+    const parts = text
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+
+    if (parts.length === 0) return 'solve'
+
+    const [first, ...rest] = parts
+    const base = first + rest.map(part => part[0].toUpperCase() + part.slice(1)).join('')
+    if (/^[0-9]/.test(base)) return `solve${base}`
+    return base
+}
+
+function getAlgorithmCppTemplate(algo) {
+    const methodName = toCamelCase(algo?.nameEn || algo?.name || 'solve')
+    return `#include <bits/stdc++.h>
+using namespace std;
+
+class Solution {
+public:
+    // TODO: 按题意补全参数与返回值
+    void ${methodName}() {
+        // TODO: 实现 ${algo?.name || '该算法'} 的 C++ 版本
+    }
+};
+
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+
+    // TODO: 读取输入并调用 Solution 方法
+    // 示例:
+    // Solution sol;
+    // sol.${methodName}();
+
+    return 0;
+}
+`
+}
+
+function getIdleRuntimeStatus(language) {
+    if (language === 'python') return '输入样例后可直接运行 Python。'
+    if (language === 'cpp') return '输入样例后可直接编译并运行 C++17。'
+    return '切换到 Python 或 C++ 后可在线运行代码。'
+}
+
 // ─── Copy Toast ──────────────────────────────────────────────
 function CopyButton({ text }) {
     const [copied, setCopied] = useState(false)
@@ -92,11 +142,11 @@ export default function Algorithm() {
     const { id } = useParams()
     const [lang, setLang] = useState('javascript')
     const [activeStep, setActiveStep] = useState(0)
-    const [editableCode, setEditableCode] = useState({ javascript: '', python: '' })
+    const [editableCode, setEditableCode] = useState({ javascript: '', python: '', cpp: '' })
     const [stdinText, setStdinText] = useState('')
     const [stdoutText, setStdoutText] = useState('')
     const [stderrText, setStderrText] = useState('')
-    const [runtimeStatus, setRuntimeStatus] = useState({ type: 'idle', text: '切换到 Python 后可在线运行代码。' })
+    const [runtimeStatus, setRuntimeStatus] = useState({ type: 'idle', text: getIdleRuntimeStatus('javascript') })
     const [isRunning, setIsRunning] = useState(false)
     const { visitAlgo, isVisited } = useProgress()
     const algo = algorithms.find(a => a.id === id)
@@ -108,12 +158,18 @@ export default function Algorithm() {
         setEditableCode({
             javascript: algo.code.javascript,
             python: algo.code.python,
+            cpp: algo.code.cpp || getAlgorithmCppTemplate(algo),
         })
         setStdinText('')
         setStdoutText('')
         setStderrText('')
-        setRuntimeStatus({ type: 'idle', text: '切换到 Python 后可在线运行代码。' })
     }, [algo?.id])
+
+    useEffect(() => {
+        setStdoutText('')
+        setStderrText('')
+        setRuntimeStatus({ type: 'idle', text: getIdleRuntimeStatus(lang) })
+    }, [lang, algo?.id])
 
     if (!algo) {
         return (
@@ -129,7 +185,7 @@ export default function Algorithm() {
     const currentIdx = catAlgos.findIndex(a => a.id === id)
     const prevAlgo = catAlgos[currentIdx - 1]
     const nextAlgo = catAlgos[currentIdx + 1]
-    const canRun = lang === 'python'
+    const canRun = lang === 'python' || lang === 'cpp'
 
     const handleCodeChange = event => {
         const next = event.target.value
@@ -137,7 +193,10 @@ export default function Algorithm() {
     }
 
     const resetCurrentCode = () => {
-        setEditableCode(prev => ({ ...prev, [lang]: algo.code[lang] }))
+        const nextCode = lang === 'cpp'
+            ? (algo.code.cpp || getAlgorithmCppTemplate(algo))
+            : (algo.code[lang] || '')
+        setEditableCode(prev => ({ ...prev, [lang]: nextCode }))
     }
 
     const runPython = async () => {
@@ -181,7 +240,7 @@ try:
     builtins.input = _fake_input
     sys.stdout = _stdout_buffer
     sys.stderr = _stderr_buffer
-    namespace = {}
+    namespace = {"__name__": "__main__"}
     exec(__algo_code, namespace)
 except Exception:
     __runner_error = traceback.format_exc()
@@ -210,6 +269,39 @@ finally:
         } finally {
             setIsRunning(false)
         }
+    }
+
+    const runCpp = async () => {
+        if (isRunning) return
+        setIsRunning(true)
+        setStdoutText('')
+        setStderrText('')
+        setRuntimeStatus({ type: 'loading', text: '正在调用 C++ 编译服务...' })
+
+        try {
+            const result = await runCppCode({
+                code: editableCode.cpp,
+                input: stdinText,
+            })
+            const parsed = parseCppRunResult(result)
+            setStdoutText(parsed.stdout)
+            setStderrText(parsed.stderr)
+            setRuntimeStatus({ type: parsed.type, text: parsed.statusText })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : '未知错误'
+            setRuntimeStatus({ type: 'error', text: 'C++ 运行服务不可用。' })
+            setStderrText(message)
+        } finally {
+            setIsRunning(false)
+        }
+    }
+
+    const runCurrentCode = async () => {
+        if (lang === 'cpp') {
+            await runCpp()
+            return
+        }
+        await runPython()
     }
 
     return (
@@ -306,13 +398,13 @@ finally:
                         <div className="code-header">
                             <h2 className="content-h2" style={{ margin: 0 }}>💻 代码实现</h2>
                             <div className="lang-tabs">
-                                {['javascript', 'python'].map(l => (
+                                {['javascript', 'python', 'cpp'].map(l => (
                                     <button
                                         key={l}
                                         className={`lang-tab${lang === l ? ' active' : ''}`}
                                         onClick={() => setLang(l)}
                                     >
-                                        {l === 'javascript' ? 'JavaScript' : 'Python'}
+                                        {l === 'javascript' ? 'JavaScript' : l === 'python' ? 'Python' : 'C++'}
                                     </button>
                                 ))}
                             </div>
@@ -324,7 +416,9 @@ finally:
                                     <span style={{ background: '#f59e0b' }} />
                                     <span style={{ background: '#22c55e' }} />
                                 </div>
-                                <span className="code-lang">{lang === 'javascript' ? 'JavaScript' : 'Python'}</span>
+                                <span className="code-lang">
+                                    {lang === 'javascript' ? 'JavaScript' : lang === 'python' ? 'Python' : 'C++'}
+                                </span>
                                 <button className="copy-btn" onClick={resetCurrentCode} title="重置为模板代码">
                                     重置
                                 </button>
@@ -349,13 +443,16 @@ finally:
                             {canRun ? (
                                 <>
                                     <p className="runtime-tip">
-                                        当前支持 Python 在线执行。代码中的 <code>input()</code> 将读取下方输入框；请使用 <code>print(...)</code> 输出结果。
+                                        {lang === 'cpp'
+                                            ? <>当前使用 C++17 在线执行。输入会写入 <code>cin</code>，请使用 <code>cout</code> 输出结果。</>
+                                            : <>当前支持 Python 在线执行。代码中的 <code>input()</code> 将读取下方输入框；请使用 <code>print(...)</code> 输出结果。</>
+                                        }
                                     </p>
-                                    <label className="runtime-label" htmlFor="python-stdin">
+                                    <label className="runtime-label" htmlFor="code-stdin">
                                         标准输入（可选，按行输入）
                                     </label>
                                     <textarea
-                                        id="python-stdin"
+                                        id="code-stdin"
                                         className="runtime-io-input"
                                         value={stdinText}
                                         onChange={event => setStdinText(event.target.value)}
@@ -363,8 +460,8 @@ finally:
                                         spellCheck={false}
                                     />
                                     <div className="runtime-actions">
-                                        <button className="run-btn" onClick={runPython} disabled={isRunning}>
-                                            {isRunning ? '运行中...' : '运行 Python'}
+                                        <button className="run-btn" onClick={runCurrentCode} disabled={isRunning}>
+                                            {isRunning ? '运行中...' : (lang === 'cpp' ? '编译并运行 C++' : '运行 Python')}
                                         </button>
                                         <button
                                             className="copy-btn"
@@ -390,7 +487,7 @@ finally:
                                 </>
                             ) : (
                                 <p className="runtime-tip">
-                                    当前只支持 Python 在线运行。C++/Java 等语言可在后续版本通过后端沙箱接入。
+                                    切换到 Python 或 C++ 后可在线运行代码。
                                 </p>
                             )}
                         </div>

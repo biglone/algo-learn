@@ -1,4 +1,5 @@
 import { getProblemPythonCode } from './problemPythonCodes'
+import { getProblemCppCode } from './problemCppCodes'
 
 const GUIDES = {
     '1': {
@@ -1074,7 +1075,9 @@ function normalizeGuide(task, dayTheme, guide) {
         pitch: guide.pitch,
         thinkingFlow,
         hasPythonCode: !isMock,
+        hasCppCode: !isMock,
         pythonCode: isMock ? '' : getProblemPythonCode(task),
+        cppCode: isMock ? '' : getProblemCppCode(task),
     }
 }
 
