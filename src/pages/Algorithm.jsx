@@ -6,6 +6,68 @@ import { useProgress } from '../hooks/useProgress'
 import './Algorithm.css'
 
 const difficultyLabel = { easy: '入门', medium: '进阶', hard: '困难' }
+const PYODIDE_VERSION = '0.26.4'
+const PYODIDE_INDEX_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`
+const PYODIDE_SCRIPT_URL = `${PYODIDE_INDEX_URL}pyodide.js`
+
+let pyodideLoadPromise = null
+
+function injectScriptOnce(src) {
+    return new Promise((resolve, reject) => {
+        const existing = document.querySelector(`script[data-runtime="${src}"]`)
+        if (existing) {
+            if (existing.dataset.loaded === 'true') {
+                resolve()
+                return
+            }
+            existing.addEventListener('load', () => resolve(), { once: true })
+            existing.addEventListener('error', () => reject(new Error('加载运行时脚本失败')), { once: true })
+            return
+        }
+
+        const script = document.createElement('script')
+        script.src = src
+        script.async = true
+        script.dataset.runtime = src
+        script.addEventListener('load', () => {
+            script.dataset.loaded = 'true'
+            resolve()
+        }, { once: true })
+        script.addEventListener('error', () => reject(new Error('加载运行时脚本失败')), { once: true })
+        document.body.appendChild(script)
+    })
+}
+
+async function getPyodideInstance() {
+    if (window.__algoLearnPyodide) return window.__algoLearnPyodide
+
+    if (!pyodideLoadPromise) {
+        pyodideLoadPromise = (async () => {
+            if (typeof window.loadPyodide !== 'function') {
+                await injectScriptOnce(PYODIDE_SCRIPT_URL)
+            }
+            if (typeof window.loadPyodide !== 'function') {
+                throw new Error('Pyodide 初始化失败')
+            }
+            const instance = await window.loadPyodide({ indexURL: PYODIDE_INDEX_URL })
+            window.__algoLearnPyodide = instance
+            return instance
+        })().catch(err => {
+            pyodideLoadPromise = null
+            throw err
+        })
+    }
+
+    return pyodideLoadPromise
+}
+
+function pyGlobalToString(pyodide, name) {
+    const value = pyodide.globals.get(name)
+    if (typeof value === 'string') return value
+    const text = value?.toString ? value.toString() : ''
+    if (value && typeof value.destroy === 'function') value.destroy()
+    return text
+}
 
 // ─── Copy Toast ──────────────────────────────────────────────
 function CopyButton({ text }) {
@@ -30,11 +92,28 @@ export default function Algorithm() {
     const { id } = useParams()
     const [lang, setLang] = useState('javascript')
     const [activeStep, setActiveStep] = useState(0)
+    const [editableCode, setEditableCode] = useState({ javascript: '', python: '' })
+    const [stdinText, setStdinText] = useState('')
+    const [stdoutText, setStdoutText] = useState('')
+    const [stderrText, setStderrText] = useState('')
+    const [runtimeStatus, setRuntimeStatus] = useState({ type: 'idle', text: '切换到 Python 后可在线运行代码。' })
+    const [isRunning, setIsRunning] = useState(false)
     const { visitAlgo, isVisited } = useProgress()
     const algo = algorithms.find(a => a.id === id)
 
     useEffect(() => { setActiveStep(0) }, [id])
     useEffect(() => { if (algo) visitAlgo(algo.id) }, [algo?.id])
+    useEffect(() => {
+        if (!algo) return
+        setEditableCode({
+            javascript: algo.code.javascript,
+            python: algo.code.python,
+        })
+        setStdinText('')
+        setStdoutText('')
+        setStderrText('')
+        setRuntimeStatus({ type: 'idle', text: '切换到 Python 后可在线运行代码。' })
+    }, [algo?.id])
 
     if (!algo) {
         return (
@@ -50,6 +129,88 @@ export default function Algorithm() {
     const currentIdx = catAlgos.findIndex(a => a.id === id)
     const prevAlgo = catAlgos[currentIdx - 1]
     const nextAlgo = catAlgos[currentIdx + 1]
+    const canRun = lang === 'python'
+
+    const handleCodeChange = event => {
+        const next = event.target.value
+        setEditableCode(prev => ({ ...prev, [lang]: next }))
+    }
+
+    const resetCurrentCode = () => {
+        setEditableCode(prev => ({ ...prev, [lang]: algo.code[lang] }))
+    }
+
+    const runPython = async () => {
+        if (isRunning) return
+        setIsRunning(true)
+        setStdoutText('')
+        setStderrText('')
+        setRuntimeStatus({ type: 'loading', text: '正在初始化 Python 运行环境...' })
+
+        try {
+            const pyodide = await getPyodideInstance()
+            pyodide.globals.set('__algo_code', editableCode.python)
+            pyodide.globals.set('__algo_stdin', stdinText)
+
+            setRuntimeStatus({ type: 'running', text: '运行中...' })
+
+            await pyodide.runPythonAsync(`
+import builtins
+import io
+import sys
+import traceback
+
+__runner_output = ''
+__runner_error = ''
+__runner_stderr = ''
+
+_stdin_buffer = io.StringIO(__algo_stdin)
+_stdout_buffer = io.StringIO()
+_stderr_buffer = io.StringIO()
+_origin_input = builtins.input
+_origin_stdout = sys.stdout
+_origin_stderr = sys.stderr
+
+def _fake_input(prompt=''):
+    line = _stdin_buffer.readline()
+    if line == '':
+        raise EOFError('EOF when reading a line')
+    return line.rstrip('\\n')
+
+try:
+    builtins.input = _fake_input
+    sys.stdout = _stdout_buffer
+    sys.stderr = _stderr_buffer
+    namespace = {}
+    exec(__algo_code, namespace)
+except Exception:
+    __runner_error = traceback.format_exc()
+finally:
+    builtins.input = _origin_input
+    sys.stdout = _origin_stdout
+    sys.stderr = _origin_stderr
+    __runner_output = _stdout_buffer.getvalue()
+    __runner_stderr = _stderr_buffer.getvalue()
+`)
+
+            const stdout = pyGlobalToString(pyodide, '__runner_output').trimEnd()
+            const stderr = pyGlobalToString(pyodide, '__runner_stderr').trimEnd()
+            const runtimeError = pyGlobalToString(pyodide, '__runner_error').trimEnd()
+
+            setStdoutText(stdout)
+            setStderrText(stderr || runtimeError)
+            setRuntimeStatus({
+                type: runtimeError ? 'error' : 'ready',
+                text: runtimeError ? '运行失败，请检查报错信息。' : '运行完成。使用 print(...) 查看输出。',
+            })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : '未知错误'
+            setRuntimeStatus({ type: 'error', text: 'Python 运行环境启动失败。' })
+            setStderrText(message)
+        } finally {
+            setIsRunning(false)
+        }
+    }
 
     return (
         <div className="algo-page">
@@ -164,9 +325,74 @@ export default function Algorithm() {
                                     <span style={{ background: '#22c55e' }} />
                                 </div>
                                 <span className="code-lang">{lang === 'javascript' ? 'JavaScript' : 'Python'}</span>
-                                <CopyButton text={algo.code[lang]} />
+                                <button className="copy-btn" onClick={resetCurrentCode} title="重置为模板代码">
+                                    重置
+                                </button>
+                                <CopyButton text={editableCode[lang]} />
                             </div>
-                            <pre>{algo.code[lang]}</pre>
+                            <textarea
+                                className="code-editor"
+                                value={editableCode[lang]}
+                                onChange={handleCodeChange}
+                                spellCheck={false}
+                            />
+                        </div>
+
+                        <div className={`runtime-panel glass-card${canRun ? '' : ' disabled'}`}>
+                            <div className="runtime-panel-top">
+                                <h3 className="runtime-title">▶ 代码运行</h3>
+                                <span className={`runtime-status runtime-status-${runtimeStatus.type}`}>
+                                    {runtimeStatus.text}
+                                </span>
+                            </div>
+
+                            {canRun ? (
+                                <>
+                                    <p className="runtime-tip">
+                                        当前支持 Python 在线执行。代码中的 <code>input()</code> 将读取下方输入框；请使用 <code>print(...)</code> 输出结果。
+                                    </p>
+                                    <label className="runtime-label" htmlFor="python-stdin">
+                                        标准输入（可选，按行输入）
+                                    </label>
+                                    <textarea
+                                        id="python-stdin"
+                                        className="runtime-io-input"
+                                        value={stdinText}
+                                        onChange={event => setStdinText(event.target.value)}
+                                        placeholder="例如：\n5\n1 2 3 4 5"
+                                        spellCheck={false}
+                                    />
+                                    <div className="runtime-actions">
+                                        <button className="run-btn" onClick={runPython} disabled={isRunning}>
+                                            {isRunning ? '运行中...' : '运行 Python'}
+                                        </button>
+                                        <button
+                                            className="copy-btn"
+                                            onClick={() => { setStdoutText(''); setStderrText('') }}
+                                            disabled={isRunning}
+                                        >
+                                            清空输出
+                                        </button>
+                                    </div>
+
+                                    <div className="runtime-output-wrap">
+                                        <div className="runtime-output-block">
+                                            <p className="runtime-output-title">标准输出</p>
+                                            <pre className="runtime-output">{stdoutText || '（暂无输出）'}</pre>
+                                        </div>
+                                        <div className="runtime-output-block">
+                                            <p className="runtime-output-title">错误输出</p>
+                                            <pre className={`runtime-output${stderrText ? ' is-error' : ''}`}>
+                                                {stderrText || '（无错误）'}
+                                            </pre>
+                                        </div>
+                                    </div>
+                                </>
+                            ) : (
+                                <p className="runtime-tip">
+                                    当前只支持 Python 在线运行。C++/Java 等语言可在后续版本通过后端沙箱接入。
+                                </p>
+                            )}
                         </div>
                     </div>
 

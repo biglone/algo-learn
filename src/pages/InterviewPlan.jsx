@@ -1,7 +1,72 @@
 import { useEffect, useMemo, useState } from 'react'
+import { getProblemGuide } from '../data/problemGuides'
 import './InterviewPlan.css'
 
 const STORAGE_KEY = 'algo-learn-interview-plan-v1'
+const LEETCODE_BASE_URL = 'https://leetcode.com/problems/'
+const LEETCODE_ID_PATTERN = /^\d+$/
+const PYODIDE_VERSION = '0.26.4'
+const PYODIDE_INDEX_URL = `https://cdn.jsdelivr.net/pyodide/v${PYODIDE_VERSION}/full/`
+const PYODIDE_SCRIPT_URL = `${PYODIDE_INDEX_URL}pyodide.js`
+
+let pyodideLoadPromise = null
+
+function injectScriptOnce(src) {
+    return new Promise((resolve, reject) => {
+        const existing = document.querySelector(`script[data-runtime="${src}"]`)
+        if (existing) {
+            if (existing.dataset.loaded === 'true') {
+                resolve()
+                return
+            }
+            existing.addEventListener('load', () => resolve(), { once: true })
+            existing.addEventListener('error', () => reject(new Error('加载运行时脚本失败')), { once: true })
+            return
+        }
+
+        const script = document.createElement('script')
+        script.src = src
+        script.async = true
+        script.dataset.runtime = src
+        script.addEventListener('load', () => {
+            script.dataset.loaded = 'true'
+            resolve()
+        }, { once: true })
+        script.addEventListener('error', () => reject(new Error('加载运行时脚本失败')), { once: true })
+        document.body.appendChild(script)
+    })
+}
+
+async function getPyodideInstance() {
+    if (window.__algoLearnPyodide) return window.__algoLearnPyodide
+
+    if (!pyodideLoadPromise) {
+        pyodideLoadPromise = (async () => {
+            if (typeof window.loadPyodide !== 'function') {
+                await injectScriptOnce(PYODIDE_SCRIPT_URL)
+            }
+            if (typeof window.loadPyodide !== 'function') {
+                throw new Error('Pyodide 初始化失败')
+            }
+            const instance = await window.loadPyodide({ indexURL: PYODIDE_INDEX_URL })
+            window.__algoLearnPyodide = instance
+            return instance
+        })().catch(err => {
+            pyodideLoadPromise = null
+            throw err
+        })
+    }
+
+    return pyodideLoadPromise
+}
+
+function pyGlobalToString(pyodide, name) {
+    const value = pyodide.globals.get(name)
+    if (typeof value === 'string') return value
+    const text = value?.toString ? value.toString() : ''
+    if (value && typeof value.destroy === 'function') value.destroy()
+    return text
+}
 
 const PLAN_DAYS = [
     {
@@ -182,8 +247,28 @@ function loadProgress() {
     }
 }
 
+function titleToLeetCodeSlug(title) {
+    return title
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+}
+
+function getTaskLink(task) {
+    if (!LEETCODE_ID_PATTERN.test(task.id)) return null
+    return `${LEETCODE_BASE_URL}${titleToLeetCodeSlug(task.title)}/`
+}
+
 export default function InterviewPlan() {
     const [progress, setProgress] = useState(() => loadProgress())
+    const [activeGuideRef, setActiveGuideRef] = useState(null)
+    const [codeCopied, setCodeCopied] = useState(false)
+    const [guideCode, setGuideCode] = useState('')
+    const [guideInput, setGuideInput] = useState('')
+    const [guideStdout, setGuideStdout] = useState('')
+    const [guideStderr, setGuideStderr] = useState('')
+    const [isRunning, setIsRunning] = useState(false)
+    const [runtimeStatus, setRuntimeStatus] = useState({ type: 'idle', text: '输入样例后可直接运行 Python。' })
 
     useEffect(() => {
         try {
@@ -200,10 +285,126 @@ export default function InterviewPlan() {
     const total = allTasks.length
     const done = allTasks.reduce((acc, task) => (progress[taskKey(task.dayId, task.id)] ? acc + 1 : acc), 0)
     const percent = total > 0 ? Math.round((done / total) * 100) : 0
+    const activeGuide = useMemo(() => {
+        if (!activeGuideRef) return null
+        const day = PLAN_DAYS.find(item => item.id === activeGuideRef.dayId)
+        if (!day) return null
+        const task = day.tasks.find(item => item.id === activeGuideRef.taskId)
+        if (!task) return null
+        return getProblemGuide(task, day.theme)
+    }, [activeGuideRef])
+
+    useEffect(() => {
+        setCodeCopied(false)
+        if (activeGuide?.hasPythonCode) {
+            setGuideCode(activeGuide.pythonCode)
+        } else {
+            setGuideCode('')
+        }
+        setGuideInput('')
+        setGuideStdout('')
+        setGuideStderr('')
+        setRuntimeStatus({ type: 'idle', text: '输入样例后可直接运行 Python。' })
+    }, [activeGuideRef?.dayId, activeGuideRef?.taskId, activeGuide?.hasPythonCode, activeGuide?.pythonCode])
 
     const toggleTask = (dayId, taskId) => {
         const key = taskKey(dayId, taskId)
         setProgress(prev => ({ ...prev, [key]: !prev[key] }))
+    }
+
+    const toggleGuide = (dayId, taskId) => {
+        setActiveGuideRef(prev => {
+            if (prev && prev.dayId === dayId && prev.taskId === taskId) return null
+            return { dayId, taskId }
+        })
+    }
+
+    const copyGuideCode = async () => {
+        if (!activeGuide?.hasPythonCode || !guideCode) return
+        try {
+            await navigator.clipboard.writeText(guideCode)
+            setCodeCopied(true)
+            window.setTimeout(() => setCodeCopied(false), 2000)
+        } catch {
+            // ignore clipboard failures
+        }
+    }
+
+    const resetGuideCode = () => {
+        if (!activeGuide?.hasPythonCode) return
+        setGuideCode(activeGuide.pythonCode)
+    }
+
+    const runGuideCode = async () => {
+        if (!activeGuide?.hasPythonCode || isRunning) return
+
+        setIsRunning(true)
+        setGuideStdout('')
+        setGuideStderr('')
+        setRuntimeStatus({ type: 'loading', text: '正在初始化 Python 运行环境...' })
+
+        try {
+            const pyodide = await getPyodideInstance()
+            pyodide.globals.set('__interview_code', guideCode)
+            pyodide.globals.set('__interview_stdin', guideInput)
+            setRuntimeStatus({ type: 'running', text: '运行中...' })
+
+            await pyodide.runPythonAsync(`
+import builtins
+import io
+import sys
+import traceback
+
+__runner_output = ''
+__runner_error = ''
+__runner_stderr = ''
+
+_stdin_buffer = io.StringIO(__interview_stdin)
+_stdout_buffer = io.StringIO()
+_stderr_buffer = io.StringIO()
+_origin_input = builtins.input
+_origin_stdout = sys.stdout
+_origin_stderr = sys.stderr
+
+def _fake_input(prompt=''):
+    line = _stdin_buffer.readline()
+    if line == '':
+        raise EOFError('EOF when reading a line')
+    return line.rstrip('\\n')
+
+try:
+    builtins.input = _fake_input
+    sys.stdout = _stdout_buffer
+    sys.stderr = _stderr_buffer
+    namespace = {"__name__": "__main__"}
+    exec(__interview_code, namespace)
+except Exception:
+    __runner_error = traceback.format_exc()
+finally:
+    builtins.input = _origin_input
+    sys.stdout = _origin_stdout
+    sys.stderr = _origin_stderr
+    __runner_output = _stdout_buffer.getvalue()
+    __runner_stderr = _stderr_buffer.getvalue()
+`)
+
+            const stdout = pyGlobalToString(pyodide, '__runner_output').trimEnd()
+            const stderr = pyGlobalToString(pyodide, '__runner_stderr').trimEnd()
+            const runtimeError = pyGlobalToString(pyodide, '__runner_error').trimEnd()
+
+            setGuideStdout(stdout)
+            setGuideStderr(stderr || runtimeError)
+            setRuntimeStatus({
+                type: runtimeError ? 'error' : 'ready',
+                text: runtimeError ? '运行失败，请检查报错信息。' : '运行完成。使用 print(...) 查看输出。',
+            })
+        } catch (error) {
+            const message = error instanceof Error ? error.message : '未知错误'
+            setRuntimeStatus({ type: 'error', text: 'Python 运行环境启动失败。' })
+            setGuideStderr(message)
+        } finally {
+            setIsRunning(false)
+        }
     }
 
     const markDay = (dayId, checked) => {
@@ -230,7 +431,7 @@ export default function InterviewPlan() {
                     <div>
                         <h1 className="interview-plan-title">面试冲刺计划</h1>
                         <p className="interview-plan-subtitle">
-                            14 天高频算法题清单，支持本地打卡。建议每日执行：限时解题 → 复盘 → 1/3/7 天二刷。
+                            14 天高频算法题清单，支持本地打卡。点击题目可直接跳转 LeetCode。建议每日执行：限时解题 → 复盘 → 1/3/7 天二刷。
                         </p>
                         <div className="interview-plan-meta">
                             <span>总任务：{total}</span>
@@ -246,6 +447,155 @@ export default function InterviewPlan() {
                 <div className="interview-plan-progress">
                     <div className="interview-plan-progress-fill" style={{ width: `${percent}%` }} />
                 </div>
+
+                {activeGuide ? (
+                    <section className="interview-guide-panel glass-card">
+                        <div className="interview-guide-top">
+                            <div>
+                                <h2 className="interview-guide-title">原题协助 · {activeGuide.title}</h2>
+                                <p className="interview-guide-meta">
+                                    <span>{activeGuide.dayTheme}</span>
+                                    <span>方法：{activeGuide.approach}</span>
+                                    <span>时间：{activeGuide.time}</span>
+                                    <span>空间：{activeGuide.space}</span>
+                                </p>
+                            </div>
+                            <button className="plan-action-btn" onClick={() => setActiveGuideRef(null)}>收起</button>
+                        </div>
+
+                        <div className="interview-guide-grid">
+                            <article className="interview-guide-card">
+                                <h3>题目目标</h3>
+                                <p>{activeGuide.target}</p>
+                            </article>
+                            <article className="interview-guide-card">
+                                <h3>先想暴力解</h3>
+                                <p>{activeGuide.brute}</p>
+                            </article>
+                            <article className="interview-guide-card wide">
+                                <h3>突破点</h3>
+                                <p>{activeGuide.breakthrough}</p>
+                            </article>
+                        </div>
+
+                        <div className="interview-guide-steps">
+                            <h3>最优解分步骤</h3>
+                            <div className="guide-step-list">
+                                {activeGuide.steps.map((step, idx) => (
+                                    <div key={step} className="guide-step-item">
+                                        <span className="guide-step-num">{idx + 1}</span>
+                                        <p>{step}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div className="interview-guide-detail">
+                            <h3>更细思考过程</h3>
+                            <ul className="guide-bullet-list">
+                                {activeGuide.thinkingFlow.map(item => (
+                                    <li key={item}>{item}</li>
+                                ))}
+                            </ul>
+                        </div>
+
+                        {activeGuide.hasPythonCode && (
+                            <div className="interview-guide-code">
+                                <div className="interview-guide-code-top">
+                                    <h3>Python 参考代码（可编辑）</h3>
+                                    <div className="guide-code-actions">
+                                        <button
+                                            type="button"
+                                            className="guide-copy-btn"
+                                            onClick={resetGuideCode}
+                                            disabled={isRunning}
+                                        >
+                                            重置模板
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className={`guide-copy-btn${codeCopied ? ' copied' : ''}`}
+                                            onClick={copyGuideCode}
+                                        >
+                                            {codeCopied ? '已复制' : '复制代码'}
+                                        </button>
+                                    </div>
+                                </div>
+                                <textarea
+                                    className="interview-guide-code-editor"
+                                    value={guideCode}
+                                    onChange={event => setGuideCode(event.target.value)}
+                                    spellCheck={false}
+                                />
+                                <div className="interview-guide-runtime">
+                                    <div className="interview-guide-runtime-top">
+                                        <h4>在线运行</h4>
+                                        <span className={`guide-runtime-status guide-runtime-status-${runtimeStatus.type}`}>
+                                            {runtimeStatus.text}
+                                        </span>
+                                    </div>
+                                    <p className="interview-guide-runtime-tip">
+                                        代码中的 <code>input()</code> 会读取下方输入框；请用 <code>print(...)</code> 查看输出。
+                                    </p>
+                                    <label className="interview-guide-runtime-label" htmlFor="guide-python-stdin">
+                                        标准输入（可选，按行）
+                                    </label>
+                                    <textarea
+                                        id="guide-python-stdin"
+                                        className="interview-guide-runtime-input"
+                                        value={guideInput}
+                                        onChange={event => setGuideInput(event.target.value)}
+                                        placeholder="例如：\n5\n1 2 3 4 5"
+                                        spellCheck={false}
+                                    />
+                                    <div className="interview-guide-runtime-actions">
+                                        <button className="guide-run-btn" onClick={runGuideCode} disabled={isRunning}>
+                                            {isRunning ? '运行中...' : '运行 Python'}
+                                        </button>
+                                        <button
+                                            type="button"
+                                            className="guide-copy-btn"
+                                            onClick={() => { setGuideStdout(''); setGuideStderr('') }}
+                                            disabled={isRunning}
+                                        >
+                                            清空输出
+                                        </button>
+                                    </div>
+                                    <div className="interview-guide-runtime-outputs">
+                                        <div className="interview-guide-runtime-output">
+                                            <p>标准输出</p>
+                                            <pre>{guideStdout || '（暂无输出）'}</pre>
+                                        </div>
+                                        <div className="interview-guide-runtime-output">
+                                            <p>错误输出</p>
+                                            <pre className={guideStderr ? 'is-error' : ''}>{guideStderr || '（无错误）'}</pre>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="interview-guide-grid">
+                            <article className="interview-guide-card">
+                                <h3>易错点</h3>
+                                <ul className="guide-bullet-list">
+                                    {activeGuide.pitfalls.map(item => (
+                                        <li key={item}>{item}</li>
+                                    ))}
+                                </ul>
+                            </article>
+                            <article className="interview-guide-card">
+                                <h3>60 秒讲法</h3>
+                                <p>{activeGuide.pitch}</p>
+                            </article>
+                        </div>
+                    </section>
+                ) : (
+                    <section className="interview-guide-placeholder glass-card">
+                        <h2>原题协助</h2>
+                        <p>点击任意题目的「题解引导」，即可看到该题的分步思路（题目目标、暴力解、突破点、最优步骤、易错点和 60 秒讲法）。</p>
+                    </section>
+                )}
 
                 <div className="interview-plan-grid">
                     {PLAN_DAYS.map(day => {
@@ -274,16 +624,37 @@ export default function InterviewPlan() {
                                     {day.tasks.map(task => {
                                         const key = taskKey(day.id, task.id)
                                         const checked = !!progress[key]
+                                        const taskLink = getTaskLink(task)
+                                        const guideOpen = !!activeGuideRef && activeGuideRef.dayId === day.id && activeGuideRef.taskId === task.id
                                         return (
-                                            <label key={key} className={`interview-task-item${checked ? ' checked' : ''}`}>
+                                            <div key={key} className={`interview-task-item${checked ? ' checked' : ''}`}>
                                                 <input
                                                     type="checkbox"
                                                     checked={checked}
                                                     onChange={() => toggleTask(day.id, task.id)}
                                                 />
                                                 <span className="interview-task-id">{task.id}</span>
-                                                <span className="interview-task-title">{task.title}</span>
-                                            </label>
+                                                {taskLink ? (
+                                                    <a
+                                                        className="interview-task-title interview-task-link"
+                                                        href={taskLink}
+                                                        target="_blank"
+                                                        rel="noreferrer noopener"
+                                                    >
+                                                        {task.title}
+                                                        <span className="interview-task-link-icon" aria-hidden="true">↗</span>
+                                                    </a>
+                                                ) : (
+                                                    <span className="interview-task-title">{task.title}</span>
+                                                )}
+                                                <button
+                                                    type="button"
+                                                    className={`interview-guide-btn${guideOpen ? ' active' : ''}`}
+                                                    onClick={() => toggleGuide(day.id, task.id)}
+                                                >
+                                                    {guideOpen ? '收起题解' : '题解引导'}
+                                                </button>
+                                            </div>
                                         )
                                     })}
                                 </div>
