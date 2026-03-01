@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { getProblemGuide } from '../data/problemGuides'
-import { parseCppRunResult, runCppCode } from '../utils/cppRunner'
+import { getCompiledLanguageLabel, parseCompiledRunResult, runCompiledCode } from '../utils/cppRunner'
 import './InterviewPlan.css'
 
 const STORAGE_KEY = 'algo-learn-interview-plan-v1'
@@ -72,12 +72,39 @@ function pyGlobalToString(pyodide, name) {
 const GUIDE_LANGS = [
     { id: 'python', label: 'Python' },
     { id: 'cpp', label: 'C++' },
+    { id: 'go', label: 'Go' },
+    { id: 'rust', label: 'Rust' },
 ]
 
 function getGuideIdleStatus(language) {
-    return language === 'cpp'
-        ? '输入样例后可直接编译并运行 C++。'
-        : '输入样例后可直接运行 Python。'
+    if (language === 'python') return '输入样例后可直接运行 Python。'
+    return `输入样例后可直接编译并运行 ${getCompiledLanguageLabel(language)}。`
+}
+
+function getGuideCodeByLanguage(guide, language) {
+    if (!guide) return ''
+    if (language === 'cpp') return guide.cppCode || ''
+    if (language === 'go') return guide.goCode || ''
+    if (language === 'rust') return guide.rustCode || ''
+    return guide.pythonCode || ''
+}
+
+function getGuideRuntimeTip(language) {
+    if (language === 'cpp') {
+        return <>标准输入会写入程序的 <code>cin</code>；请使用 <code>cout</code> 查看输出（C++17）。</>
+    }
+    if (language === 'go') {
+        return <>标准输入会写入程序的 <code>os.Stdin</code>；请使用 <code>fmt.Print</code> 或 <code>fmt.Println</code> 查看输出。</>
+    }
+    if (language === 'rust') {
+        return <>标准输入会写入程序的 <code>stdin</code>；请使用 <code>println!</code> 查看输出。</>
+    }
+    return <>代码中的 <code>input()</code> 会读取下方输入框；请用 <code>print(...)</code> 查看输出。</>
+}
+
+function getGuideRunText(language) {
+    if (language === 'python') return '运行 Python'
+    return `编译并运行 ${getCompiledLanguageLabel(language)}`
 }
 
 const PLAN_DAYS = [
@@ -276,7 +303,7 @@ export default function InterviewPlan() {
     const [activeGuideRef, setActiveGuideRef] = useState(null)
     const [codeCopied, setCodeCopied] = useState(false)
     const [guideLang, setGuideLang] = useState('python')
-    const [guideCodeByLang, setGuideCodeByLang] = useState({ python: '', cpp: '' })
+    const [guideCodeByLang, setGuideCodeByLang] = useState({ python: '', cpp: '', go: '', rust: '' })
     const [guideInput, setGuideInput] = useState('')
     const [guideStdout, setGuideStdout] = useState('')
     const [guideStderr, setGuideStderr] = useState('')
@@ -306,8 +333,13 @@ export default function InterviewPlan() {
         if (!task) return null
         return getProblemGuide(task, day.theme)
     }, [activeGuideRef])
-    const guideRuntimeEnabled = !!activeGuide && (activeGuide.hasPythonCode || activeGuide.hasCppCode)
-    const guideCode = guideLang === 'cpp' ? guideCodeByLang.cpp : guideCodeByLang.python
+    const guideRuntimeEnabled = !!activeGuide && (
+        activeGuide.hasPythonCode
+        || activeGuide.hasCppCode
+        || activeGuide.hasGoCode
+        || activeGuide.hasRustCode
+    )
+    const guideCode = guideCodeByLang[guideLang] || ''
 
     useEffect(() => {
         setCodeCopied(false)
@@ -315,6 +347,8 @@ export default function InterviewPlan() {
         setGuideCodeByLang({
             python: activeGuide?.hasPythonCode ? activeGuide.pythonCode : '',
             cpp: activeGuide?.hasCppCode ? activeGuide.cppCode : '',
+            go: activeGuide?.hasGoCode ? activeGuide.goCode : '',
+            rust: activeGuide?.hasRustCode ? activeGuide.rustCode : '',
         })
         setGuideInput('')
         setGuideStdout('')
@@ -325,8 +359,12 @@ export default function InterviewPlan() {
         activeGuideRef?.taskId,
         activeGuide?.hasPythonCode,
         activeGuide?.hasCppCode,
+        activeGuide?.hasGoCode,
+        activeGuide?.hasRustCode,
         activeGuide?.pythonCode,
         activeGuide?.cppCode,
+        activeGuide?.goCode,
+        activeGuide?.rustCode,
     ])
 
     useEffect(() => {
@@ -362,7 +400,7 @@ export default function InterviewPlan() {
 
     const resetGuideCode = () => {
         if (!guideRuntimeEnabled) return
-        const codeTemplate = guideLang === 'cpp' ? activeGuide?.cppCode : activeGuide?.pythonCode
+        const codeTemplate = getGuideCodeByLanguage(activeGuide, guideLang)
         setGuideCodeByLang(prev => ({ ...prev, [guideLang]: codeTemplate || '' }))
     }
 
@@ -436,24 +474,26 @@ finally:
         }
     }
 
-    const runGuideCpp = async () => {
+    const runGuideCompiled = async language => {
+        const languageLabel = getCompiledLanguageLabel(language)
         setIsRunning(true)
         setGuideStdout('')
         setGuideStderr('')
-        setRuntimeStatus({ type: 'loading', text: '正在调用 C++ 编译服务...' })
+        setRuntimeStatus({ type: 'loading', text: `正在调用 ${languageLabel} 编译服务...` })
 
         try {
-            const result = await runCppCode({
-                code: guideCodeByLang.cpp,
+            const result = await runCompiledCode({
+                language,
+                code: guideCodeByLang[language],
                 input: guideInput,
             })
-            const parsed = parseCppRunResult(result)
+            const parsed = parseCompiledRunResult(result, language)
             setGuideStdout(parsed.stdout)
             setGuideStderr(parsed.stderr)
             setRuntimeStatus({ type: parsed.type, text: parsed.statusText })
         } catch (error) {
             const message = error instanceof Error ? error.message : '未知错误'
-            setRuntimeStatus({ type: 'error', text: 'C++ 运行服务不可用。' })
+            setRuntimeStatus({ type: 'error', text: `${languageLabel} 运行服务不可用。` })
             setGuideStderr(message)
         } finally {
             setIsRunning(false)
@@ -462,11 +502,11 @@ finally:
 
     const runGuideCode = async () => {
         if (!guideRuntimeEnabled || isRunning) return
-        if (guideLang === 'cpp') {
-            await runGuideCpp()
+        if (guideLang === 'python') {
+            await runGuidePython()
             return
         }
-        await runGuidePython()
+        await runGuideCompiled(guideLang)
     }
 
     const markDay = (dayId, checked) => {
@@ -565,7 +605,7 @@ finally:
                             <div className="interview-guide-code">
                                 <div className="interview-guide-code-top">
                                     <div className="guide-code-head">
-                                        <h3>{guideLang === 'cpp' ? 'C++ 参考代码（可编辑）' : 'Python 参考代码（可编辑）'}</h3>
+                                        <h3>{GUIDE_LANGS.find(item => item.id === guideLang)?.label || 'Python'} 参考代码（可编辑）</h3>
                                         <div className="guide-lang-tabs">
                                             {GUIDE_LANGS.map(item => (
                                                 <button
@@ -615,10 +655,7 @@ finally:
                                         </span>
                                     </div>
                                     <p className="interview-guide-runtime-tip">
-                                        {guideLang === 'cpp'
-                                            ? <>标准输入会写入程序的 <code>cin</code>；请使用 <code>cout</code> 查看输出（C++17）。</>
-                                            : <>代码中的 <code>input()</code> 会读取下方输入框；请用 <code>print(...)</code> 查看输出。</>
-                                        }
+                                        {getGuideRuntimeTip(guideLang)}
                                     </p>
                                     <label className="interview-guide-runtime-label" htmlFor="guide-code-stdin">
                                         标准输入（可选，按行）
@@ -633,7 +670,7 @@ finally:
                                     />
                                     <div className="interview-guide-runtime-actions">
                                         <button className="guide-run-btn" onClick={runGuideCode} disabled={isRunning}>
-                                            {isRunning ? '运行中...' : (guideLang === 'cpp' ? '编译并运行 C++' : '运行 Python')}
+                                            {isRunning ? '运行中...' : getGuideRunText(guideLang)}
                                         </button>
                                         <button
                                             type="button"
