@@ -4,6 +4,7 @@
 
 ```bash
 cd /home/Biglone/workspace/algo-learn
+# 会同时启动前端站点与 C++/Go/Rust 运行服务
 docker compose up -d --build
 ```
 

@@ -1,4 +1,7 @@
 import { getProblemPythonCode } from './problemPythonCodes'
+import { getProblemCppCode } from './problemCppCodes'
+import { getProblemGoCode } from './problemGoCodes'
+import { getProblemRustCode } from './problemRustCodes'
 
 const GUIDES = {
     '1': {
@@ -1074,7 +1077,13 @@ function normalizeGuide(task, dayTheme, guide) {
         pitch: guide.pitch,
         thinkingFlow,
         hasPythonCode: !isMock,
+        hasCppCode: !isMock,
+        hasGoCode: !isMock,
+        hasRustCode: !isMock,
         pythonCode: isMock ? '' : getProblemPythonCode(task),
+        cppCode: isMock ? '' : getProblemCppCode(task),
+        goCode: isMock ? '' : getProblemGoCode(task),
+        rustCode: isMock ? '' : getProblemRustCode(task),
     }
 }
 
